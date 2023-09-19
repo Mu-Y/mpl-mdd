@@ -1,0 +1,120 @@
+# Seed needs to be set at top of yaml, before objects with parameters are made
+seed: 1234
+__set_seed: !apply:torch.manual_seed [!ref <seed>]
+output_folder: !ref results/wav2vec2-base_ctc/
+wer_file: !ref <output_folder>/wer.txt
+mpd_file: !ref <output_folder>/mpd.txt
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+# URL for the wav2vec2 model.
+wav2vec2_hub: "facebook/wav2vec2-base"  # wav2vec2-base, pre-trained only on LS 960h
+
+# Data files
+data_folder_save: "./data"
+# prepared l2arctic data
+train_annotation: !ref <data_folder_save>/train-train.json
+unlabeled_annotation: !ref <data_folder_save>/train_unlabeled.json
+valid_annotation: !ref <data_folder_save>/train-dev.json
+test_annotation: !ref <data_folder_save>/test.json
+
+# Training parameters
+number_of_epochs: 100
+batch_size_labeled: 16 # 16 works for wav2vec2-base; 4 works for wav2vec-base-960h
+batch_size_unlabeled: 16 # 16 works for wav2vec2-base; 4 works for wav2vec-base-960h
+num_workers: 8
+lr: 0.0003
+lr_wav2vec: 0.00001
+sorting: random
+auto_mix_prec: False
+sample_rate: 16000
+gradient_accumulation: 2
+base_model_factor: 0.5
+
+# Model parameters
+activation: !name:torch.nn.LeakyReLU
+dnn_layers: 2
+dnn_neurons: 384
+freeze_wav2vec: False
+freeze_wav2vec_feature_extractor: True  # freeze the CNN extractor in wav2vec
+wav2vec2_specaug: True
+
+# Outputs
+output_neurons: 42 # l2arctic: 40phns(sil)+err+blank=42
+blank_index: 0
+
+augmentation: !new:speechbrain.lobes.augment.TimeDomainSpecAugment
+    sample_rate: !ref <sample_rate>
+    speeds: [95, 100, 105]
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <number_of_epochs>
+
+# 1024 for wav2vec2-large, 768 for wav2vec2-base
+enc: !new:speechbrain.lobes.models.VanillaNN.VanillaNN
+    input_shape: [null, null, 768]
+    activation: !ref <activation>
+    dnn_blocks: !ref <dnn_layers>
+    dnn_neurons: !ref <dnn_neurons>
+
+wav2vec2: !new:speechbrain.lobes.models.huggingface_wav2vec.HuggingFaceWav2Vec2
+    source: !ref <wav2vec2_hub>
+    output_norm: True
+    freeze: !ref <freeze_wav2vec>
+    freeze_feature_extractor: !ref <freeze_wav2vec_feature_extractor>
+    save_path: !ref <save_folder>/wav2vec2_checkpoint
+
+
+ctc_lin: !new:speechbrain.nnet.linear.Linear
+    input_size: !ref <dnn_neurons>
+    n_neurons: !ref <output_neurons>  # 39 phonemes + 1 blank
+
+
+log_softmax: !new:speechbrain.nnet.activations.Softmax
+    apply_log: True
+
+ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
+    blank_index: !ref <blank_index>
+
+
+model: !new:torch.nn.ModuleList
+    - [!ref <enc>, !ref <ctc_lin>]
+
+adam_opt_class: !name:torch.optim.Adam
+    lr: !ref <lr>
+
+wav2vec_opt_class: !name:torch.optim.Adam
+    lr: !ref <lr_wav2vec>
+
+modules:
+    wav2vec2: !ref <wav2vec2>
+    enc: !ref <enc>
+    ctc_lin: !ref <ctc_lin>
+
+### teacher model layers
+enc_teacher: !copy <enc>
+ctc_lin_teacher: !copy <ctc_lin>
+wav2vec2_teacher: !copy <wav2vec2>
+model_teacher: !new:torch.nn.ModuleList
+    - [!ref <enc_teacher>, !ref <ctc_lin_teacher>]
+modules_teacher:
+    wav2vec2: !ref <wav2vec2_teacher>
+    enc: !ref <enc_teacher>
+    ctc_lin: !ref <ctc_lin_teacher>
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        model: !ref <model>
+        wav2vec2: !ref <wav2vec2>
+        counter: !ref <epoch_counter>
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
+
+ctc_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.ctc_loss
+        blank_index: !ref <blank_index>
+        reduction: batch
+
+per_stats: !name:speechbrain.utils.metric_stats.ErrorRateStats

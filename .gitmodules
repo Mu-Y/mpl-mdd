@@ -1,0 +1,4 @@
+[submodule "speechbrain"]
+	path = speechbrain
+	url = https://github.com/Mu-Y/speechbrain
+	branch = stable_sb
