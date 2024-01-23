@@ -243,7 +243,7 @@ def mpd_stats(align_c2p, align_c2h, c, p, h):
     cnt = 0
     ta, fr, fa, tr, cor_diag, err_diag = 0, 0, 0, 0, 0, 0
     # cano_len = 1 + max(x[1] for x in align_c2p)
-    assert max(x[1] for x in align_c2p if x[1] is not None) ==  max(x[1] for x in align_c2h if x[1] if not None)
+    assert max(x[1] for x in align_c2p if x[1] is not None) ==  max(x[1] for x in align_c2h if x[1] is not None)
 
     i, j = 0, 0
     while i < len(align_c2p) and j < len(align_c2h):
